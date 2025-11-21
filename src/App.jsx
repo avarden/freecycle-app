@@ -14,9 +14,9 @@ import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query } 
 // Define Sandbox status safely
 const isSandbox = typeof __firebase_config !== 'undefined';
 
-// GEMINI API KEY (Sandbox: Leave empty. Local: Paste your key)
-const API_KEY = "AIzaSyC0wWMVLa1BR7lFL2QNDH1MHvDTwtkzQLw"; 
-const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025"; 
+// The code asks Vite: "Do you have a variable named VITE_GEMINI_KEY?"
+const RAW_API_KEY = import.meta.env.VITE_GEMINI_KEY || "";
+const API_KEY = RAW_API_KEY.trim();
 
 // Function to get the best available Firebase Config
 const getFirebaseConfig = () => {
