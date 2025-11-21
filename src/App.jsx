@@ -16,7 +16,7 @@ const isSandbox = typeof __firebase_config !== 'undefined';
 
 // GEMINI API KEY (Sandbox: Leave empty. Local: Paste your key)
 const API_KEY = "AIzaSyAKmYCCYvbxGNdgImd1J-fHaY5UwO4VO04"; 
-const GEMINI_MODEL = "gemini-1.5-flash"; 
+const GEMINI_MODEL = "gemini-1.5-flash-001"; 
 
 // Function to get the best available Firebase Config
 const getFirebaseConfig = () => {
