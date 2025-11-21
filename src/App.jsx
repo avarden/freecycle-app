@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, Plus, Search, ArrowLeft, Send, Package, MapPin, Clock, Info, CheckCircle, Sparkles, User, Bot, Trash2, Heart, Loader } from 'lucide-react';
-import { initializeApp } from 'firebase/app';
+
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query } from 'firebase/firestore';
 
