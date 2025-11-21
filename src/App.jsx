@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Search, ArrowLeft, Send, Package, MapPin, Clock, CheckCircle, Sparkles, User, Bot, AlertTriangle } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
@@ -11,18 +10,35 @@ import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query } 
 
 // --- 1. ROBUST CONFIGURATION SETUP ---
 
-// Define Sandbox status safely
 const isSandbox = typeof __firebase_config !== 'undefined';
 
-// The code asks Vite: "Do you have a variable named VITE_GEMINI_KEY?"
-const RAW_API_KEY = import.meta.env.VITE_GEMINI_KEY || "";
-const API_KEY = RAW_API_KEY.trim();
+// GEMINI API KEY CONFIGURATION
+// We use a try-catch block to safely read the Environment Variable.
+// This prevents the "import.meta" warning from breaking the sandbox.
+let API_KEY = "";
+try {
+  // In Vercel (Vite), this will read your secret key.
+  // In Sandbox, this block gracefully fails or returns undefined.
+  if (import.meta && import.meta.env && import.meta.env.VITE_GEMINI_KEY) {
+    API_KEY = import.meta.env.VITE_GEMINI_KEY.trim();
+  }
+} catch (e) {
+  // Ignore environment read errors in sandbox
+  console.log("Running in Sandbox mode (No Env Vars)");
+}
 
-// Function to get the best available Firebase Config
+// DEBUGGING: Print partial key to Console (Safe version)
+if (API_KEY) {
+    console.log("🔑 DEBUG: Loaded API Key starting with:", API_KEY.substring(0, 5) + "...");
+} else {
+    console.log("🔑 DEBUG: No API Key loaded (Normal for Sandbox Preview)");
+}
+
+// FIXED: Using the specific model version from your available list
+const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025"; 
+
 const getFirebaseConfig = () => {
   let config = null;
-
-  // 1. Try to load Sandbox Config
   if (isSandbox) {
     try {
       config = JSON.parse(__firebase_config);
@@ -30,11 +46,9 @@ const getFirebaseConfig = () => {
       console.warn("Sandbox config available but failed to parse:", err);
     }
   }
-
-  // 2. If no Sandbox config, use the Manual/Local Config
   if (!config) {
     config = {
-      // PASTE YOUR REAL FIREBASE CONFIG HERE FOR LOCAL/DEPLOYMENT
+      // PASTE YOUR REAL FIREBASE CONFIG HERE FOR DEPLOYMENT
         apiKey: "AIzaSyDMikDWDj9kvVPSETToK5jYdmrdjqGXnts",
         authDomain: "my-freecycle-app.firebaseapp.com",
         projectId: "my-freecycle-app",
@@ -44,14 +58,12 @@ const getFirebaseConfig = () => {
         measurementId: "G-EQJLHWDNJC"
     };
   }
-
   return config;
 };
 
 const firebaseConfig = getFirebaseConfig();
 
 // --- 2. INITIALIZE FIREBASE ---
-// We initialize conditionally to prevent crashes if config is totally missing
 let app, auth, db;
 
 try {
@@ -60,24 +72,21 @@ try {
     auth = getAuth(app);
     db = getFirestore(app);
   } else if (isSandbox && firebaseConfig) {
-    // Sandbox environment usually has valid config even if we can't validate key format
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
   } else {
-    console.error("Firebase Config is missing or invalid. Please update src/App.jsx with your keys.");
+    console.error("Firebase Config is missing or invalid.");
   }
 } catch (error) {
   console.error("Error initializing Firebase:", error);
 }
 
-// Helper to safely get database ref
 const getListingsRef = (databaseInstance) => {
   if (!databaseInstance) return null;
   
   if (isSandbox) {
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-    // Sanitize ID to prevent "Invalid collection reference" errors
     const safeAppId = appId.replace(/\//g, '_');
     return collection(databaseInstance, 'artifacts', safeAppId, 'public', 'data', 'listings');
   } else {
@@ -117,7 +126,7 @@ const ConfigErrorBanner = () => (
     <div>
       <h3 className="font-bold text-sm">Configuration Required</h3>
       <p className="text-xs mt-1">
-        Firebase is not connected. If you are running this locally, open <code>src/App.jsx</code> and paste your <code>firebaseConfig</code> keys in the configuration section.
+        Firebase is not connected. If you are running this locally, open <code>src/App.jsx</code> and paste your <code>firebaseConfig</code> keys.
       </p>
     </div>
   </div>
@@ -404,7 +413,18 @@ const ItemDetail = ({ item, onBack }) => {
       
       YOUR GOAL:
       Answer the potential taker's questions based strictly on the information above.
+      If the answer is explicitly in the details, give it clearly.
+      If the user asks if it's still available, assume YES.
+      If the user asks something not covered in the details (e.g., "Is it heavy?" if weight isn't listed, or "Can you deliver?" if not specified), apologize and say you don't know but can ask the owner.
+      Be concise, polite, and encouraging.
+      If the user says "I want it" or expresses strong interest, instruct them to click the "Claim / Message Owner" button below to finalize the pickup.
     `;
+
+    if (!isSandbox && (!API_KEY || API_KEY.length < 10)) {
+      setMessages(prev => [...prev, { role: 'model', text: "Configuration Error: The Gemini API Key is missing in src/App.jsx. Please add it to your code and redeploy." }]);
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const apiKey = isSandbox ? "" : API_KEY;
@@ -429,7 +449,7 @@ const ItemDetail = ({ item, onBack }) => {
       setMessages(prev => [...prev, { role: 'model', text: aiResponse }]);
     } catch (error) {
       console.error("API Error:", error);
-      setMessages(prev => [...prev, { role: 'model', text: "I'm having trouble connecting to the server. Please try again." }]);
+      setMessages(prev => [...prev, { role: 'model', text: `Debug Error: ${error.message || "Unknown Error"}. Check browser console for details.` }]);
     } finally {
       setIsLoading(false);
     }
@@ -509,231 +529,6 @@ const ItemDetail = ({ item, onBack }) => {
           </button>
         </form>
       </div>
-    </div>
-  );
-};
-
-const BrowseListings = ({ listings, onSelect, setView, seedData, isLoading }) => (
-  <div className="max-w-5xl mx-auto p-4 animate-fade-in">
-    <div className="flex justify-between items-end mb-6">
-        <div>
-            <h2 className="text-2xl font-bold text-gray-800">Available Free Items</h2>
-            <p className="text-gray-500">Select an item to chat with the AI assistant.</p>
-        </div>
-        <button 
-            onClick={() => setView('create')}
-            className="hidden md:flex items-center gap-2 text-emerald-700 font-medium hover:text-emerald-800"
-        >
-            <Plus size={18} /> List Item
-        </button>
-    </div>
-
-    {isLoading ? (
-       <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600"></div>
-       </div>
-    ) : listings.length === 0 ? (
-        <div className="flex flex-col items-center justify-center bg-white rounded-2xl p-12 border border-dashed border-gray-300 text-center">
-            <Package size={48} className="text-gray-300 mb-4" />
-            <h3 className="text-xl font-bold text-gray-600 mb-2">No items yet</h3>
-            <p className="text-gray-400 max-w-xs mb-6">Be the first to give something away, or load our demo data to test the AI.</p>
-            <div className="flex gap-4">
-                <button 
-                    onClick={seedData}
-                    className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors"
-                >
-                    Load Demo Data
-                </button>
-                <button 
-                    onClick={() => setView('create')}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-colors"
-                >
-                    List Item
-                </button>
-            </div>
-        </div>
-    ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {listings.map(item => (
-            <div 
-            key={item.id} 
-            onClick={() => onSelect(item)}
-            className="group bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-all duration-300"
-            >
-            <div className={`h-48 ${item.imageColor} flex items-center justify-center relative`}>
-                <Package size={48} className="text-white opacity-40 group-hover:scale-110 transition-transform duration-500" />
-                <span className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg text-xs font-bold text-gray-700 shadow-sm">
-                    {item.category}
-                </span>
-            </div>
-            <div className="p-5">
-                <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-bold text-lg text-gray-900 line-clamp-1">{item.title}</h3>
-                </div>
-                <p className="text-gray-500 text-sm mb-4 line-clamp-2 h-10">{item.description}</p>
-                
-                <div className="flex items-center gap-4 text-xs text-gray-400 font-medium uppercase tracking-wider border-t border-gray-100 pt-4">
-                <div className="flex items-center gap-1">
-                    <MapPin size={14} /> {item.location ? item.location.split(',')[0] : 'Unknown'}
-                </div>
-                <div className="flex items-center gap-1">
-                    <Bot size={14} /> AI Ready
-                </div>
-                </div>
-            </div>
-            </div>
-        ))}
-        </div>
-    )}
-  </div>
-);
-
-// --- Main App Component ---
-
-const App = () => {
-  const [view, setView] = useState('landing'); 
-  const [listings, setListings] = useState([]);
-  const [selectedItem, setSelectedItem] = useState(null);
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  // Auth Initialization
-  useEffect(() => {
-    if (!auth) return; // Guard if config failed
-
-    const initAuth = async () => {
-      try {
-        if (isSandbox) {
-            // Sandbox Auth (uses token)
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-                await signInAnonymously(auth);
-            }
-        } else {
-            // Prod Auth
-            await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error("Auth error:", error);
-      }
-    };
-    initAuth();
-
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-        setUser(currentUser);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Firestore Listener
-  useEffect(() => {
-    if (!user || !db) {
-        setLoading(false);
-        return;
-    }
-
-    const ref = getListingsRef(db);
-    if(!ref) return;
-
-    const q = query(ref);
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        const items = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        }));
-        // Sort by newest first
-        items.sort((a, b) => {
-            const timeA = a.createdAt?.seconds || 0;
-            const timeB = b.createdAt?.seconds || 0;
-            return timeB - timeA;
-        });
-        
-        setListings(items);
-        setLoading(false);
-    }, (error) => {
-        console.error("Error fetching listings:", error);
-        setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
-
-  const handleSelectItem = (item) => {
-    setSelectedItem(item);
-    setView('detail');
-  };
-
-  const seedDemoData = async () => {
-    if(!user || !db) return;
-    setLoading(true);
-    try {
-        const ref = getListingsRef(db);
-        if (!ref) throw new Error("DB ref not found");
-
-        const promises = DEMO_LISTINGS.map(item => 
-            addDoc(ref, {
-                ...item,
-                ownerId: user.uid,
-                createdAt: serverTimestamp()
-            })
-        );
-        await Promise.all(promises);
-    } catch (err) {
-        console.error("Error seeding data:", err);
-    }
-  };
-
-  // If Config is invalid, show banner but don't crash
-  const showConfigError = !db && !isSandbox;
-
-  return (
-    <div className="min-h-screen bg-gray-50 font-sans text-gray-900">
-      {showConfigError && <ConfigErrorBanner />}
-      <Header setView={setView} view={view} user={user} />
-      
-      <main>
-        {view === 'landing' && <LandingPage setView={setView} />}
-        
-        {view === 'create' && (
-          <CreateListing setView={setView} user={user} />
-        )}
-        
-        {view === 'browse' && (
-          <BrowseListings 
-            listings={listings} 
-            onSelect={handleSelectItem} 
-            setView={setView}
-            seedData={seedDemoData}
-            isLoading={loading}
-          />
-        )}
-        
-        {view === 'detail' && selectedItem && (
-          <ItemDetail 
-            item={selectedItem} 
-            onBack={() => setView('browse')} 
-          />
-        )}
-      </main>
-      
-      <style>{`
-        @keyframes fade-in {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes slide-up {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in {
-          animation: fade-in 0.5s ease-out;
-        }
-        .animate-slide-up {
-          animation: slide-up 0.5s ease-out;
-        }
-      `}</style>
     </div>
   );
 };
