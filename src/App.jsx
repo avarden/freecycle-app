@@ -15,7 +15,7 @@ import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query } 
 const isSandbox = typeof __firebase_config !== 'undefined';
 
 // GEMINI API KEY (Sandbox: Leave empty. Local: Paste your key)
-const API_KEY = "AIzaSyAKmYCCYvbxGNdgImd1J-fHaY5UwO4VO04"; 
+const API_KEY = "AIzaSyC0wWMVLa1BR7lFL2QNDH1MHvDTwtkzQLw"; 
 const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025"; 
 
 // Function to get the best available Firebase Config
