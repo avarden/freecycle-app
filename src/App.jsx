@@ -1,25 +1,32 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageSquare, Plus, Search, ArrowLeft, Send, Package, MapPin, Clock, Info, CheckCircle, Sparkles, User, Bot, Trash2, Heart, Loader } from 'lucide-react';
-
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { Plus, Search, ArrowLeft, Send, Package, MapPin, Clock, CheckCircle, Sparkles, User, Bot } from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query } from 'firebase/firestore';
 
 /**
- * FreeCycle AI Assistant (Firestore Integrated)
- * * A React application demonstrating an AI agent that mediates exchanges of free items.
- * * Now connected to Firebase Firestore for persistent, shared data.
+ * FreeCycle AI Assistant (Hybrid: Works in Sandbox & Production)
  */
 
-// Gemini Key
+// --- 1. ENVIRONMENT DETECTION ---
+// This checks if we are running inside the Chat Editor (Sandbox)
+const isSandbox = typeof __firebase_config !== 'undefined';
+
+// --- 2. CONFIGURATION ---
+
+// GEMINI API KEY
+// Sandbox: Leave empty (""). 
+// Production: Paste your Google AI Studio key.
+
 const API_KEY = "AIzaSyAKmYCCYvbxGNdgImd1J-fHaY5UwO4VO04"; 
-const GEMINI_MODEL = "gemini-1.5-flash"; // Use the stable model
+const GEMINI_MODEL = "gemini-1.5-flash"; 
 
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
+// FIREBASE CONFIG
+let firebaseConfig;
+if (isSandbox) {
+  // Auto-configure for Sandbox
+  firebaseConfig = JSON.parse(__firebase_config);
+} else {
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
@@ -31,10 +38,27 @@ const firebaseConfig = {
   appId: "1:807602473704:web:a4fe6260a57bc7c10f175d",
   measurementId: "G-EQJLHWDNJC"
 };
+}
 
-// Initialize Firebase
+// --- 3. INITIALIZE FIREBASE ---
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// Helper to get the correct database path based on environment
+const getListingsRef = (db) => {
+  if (isSandbox) {
+    // Sandbox requires strict path structure
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    // CRITICAL FIX: Sanitize appId to ensure it doesn't contain slashes
+    // Slashes split the path into extra segments, causing "Invalid collection reference" errors.
+    const safeAppId = appId.replace(/\//g, '_');
+    return collection(db, 'artifacts', safeAppId, 'public', 'data', 'listings');
+  } else {
+    // Production can use a simple path
+    return collection(db, 'listings');
+  }
+};
 
 // --- Mock Data for Seeding ---
 const DEMO_LISTINGS = [
@@ -154,11 +178,10 @@ const CreateListing = ({ setView, user }) => {
     setIsSubmitting(true);
     
     try {
-        // Assign a random color for the card
         const colors = ['bg-teal-600', 'bg-indigo-600', 'bg-rose-600', 'bg-amber-600', 'bg-emerald-600', 'bg-blue-600', 'bg-purple-600'];
         const randomColor = colors[Math.floor(Math.random() * colors.length)];
 
-        await addDoc(collection(db,'listings'), {
+        await addDoc(getListingsRef(db), {
             ...formData,
             imageColor: randomColor,
             ownerId: user.uid,
@@ -359,8 +382,11 @@ const ItemDetail = ({ item, onBack }) => {
     `;
 
     try {
+      // Detect Sandbox vs Prod for Gemini Key
+      const apiKey = isSandbox ? "" : API_KEY;
+      
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: {
@@ -604,10 +630,16 @@ const App = () => {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
+        if (isSandbox) {
+            // Sandbox Auth (uses token)
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
         } else {
-          await signInAnonymously(auth);
+            // Prod Auth
+            await signInAnonymously(auth);
         }
       } catch (error) {
         console.error("Auth error:", error);
@@ -625,14 +657,14 @@ const App = () => {
   useEffect(() => {
     if (!user) return;
 
-    const q = query(collection(db, 'listings'));
+    // Use helper to get correct path
+    const q = query(getListingsRef(db));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
         const items = snapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data()
         }));
-        // Sort in memory to avoid compound query index requirements
         // Sort by newest first
         items.sort((a, b) => {
             const timeA = a.createdAt?.seconds || 0;
@@ -660,7 +692,8 @@ const App = () => {
     setLoading(true);
     try {
         const promises = DEMO_LISTINGS.map(item => 
-            addDoc(collection(db, 'listings'), {
+            // Use helper to get correct path
+            addDoc(getListingsRef(db), {
                 ...item,
                 ownerId: user.uid,
                 createdAt: serverTimestamp()
