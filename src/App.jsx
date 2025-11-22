@@ -15,8 +15,8 @@ const isSandbox = typeof __firebase_config !== 'undefined';
 // --- API KEY SETUP ---
 // 1. FOR SANDBOX (Here): Keep API_KEY as ""
 // 2. FOR VERCEL (Local): Uncomment the "import.meta" line below
-const RAW_API_KEY = ""; 
-// const RAW_API_KEY = import.meta.env.VITE_GEMINI_KEY || ""; // <--- UNCOMMENT THIS LINE IN VS CODE
+//const RAW_API_KEY = ""; 
+const RAW_API_KEY = import.meta.env.VITE_GEMINI_KEY || ""; // <--- UNCOMMENT THIS LINE IN VS CODE
 
 const API_KEY = (RAW_API_KEY || "").trim();
 const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025"; 
