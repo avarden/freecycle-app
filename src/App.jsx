@@ -1,27 +1,39 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Search, ArrowLeft, Send, Package, MapPin, Clock, CheckCircle, Sparkles, User, Bot, AlertTriangle } from 'lucide-react';
+import { Plus, Search, ArrowLeft, Send, Package, MapPin, Clock, CheckCircle, Sparkles, User, Bot, AlertTriangle, Upload, Image as ImageIcon } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 /**
- * FreeCycle AI Assistant (Sandbox Safe Version)
+ * FreeCycle AI Assistant (With Image Uploads)
  */
 
-// --- 1. CONFIGURATION ---
+// --- 1. ROBUST CONFIGURATION SETUP ---
 
 const isSandbox = typeof __firebase_config !== 'undefined';
 
-// --- API KEY SETUP ---
-// 1. FOR SANDBOX (Here): Keep API_KEY as ""
-// 2. FOR VERCEL (Local): Uncomment the "import.meta" line below
-//const RAW_API_KEY = ""; 
-const RAW_API_KEY = import.meta.env.VITE_GEMINI_KEY || ""; // <--- UNCOMMENT THIS LINE IN VS CODE
+// GEMINI API KEY CONFIGURATION
+let API_KEY = "";
+try {
+  // eslint-disable-next-line
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    API_KEY = import.meta.env.VITE_GEMINI_KEY || "";
+  }
+} catch (e) {
+  console.log("Running in Sandbox mode (No Env Vars)");
+}
+API_KEY = API_KEY.trim();
 
-const API_KEY = (RAW_API_KEY || "").trim();
+// DEBUGGING: Print partial key to Console (Safe version)
+if (API_KEY) {
+    console.log("🔑 DEBUG: Loaded API Key starting with:", API_KEY.substring(0, 5) + "...");
+} else if (!isSandbox) {
+    console.log("🔑 DEBUG: No API Key found. Check your .env file and Vercel Settings.");
+}
+
 const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025"; 
 
-// --- FIREBASE CONFIG ---
 const getFirebaseConfig = () => {
   let config = null;
   if (isSandbox) {
@@ -49,17 +61,19 @@ const getFirebaseConfig = () => {
 const firebaseConfig = getFirebaseConfig();
 
 // --- 2. INITIALIZE FIREBASE ---
-let app, auth, db;
+let app, auth, db, storage;
 
 try {
   if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== "PASTE_YOUR_API_KEY_HERE") {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
+    storage = getStorage(app); // Initialize Storage
   } else if (isSandbox && firebaseConfig) {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
+    storage = getStorage(app);
   } else {
     console.error("Firebase Config is missing or invalid.");
   }
@@ -186,10 +200,25 @@ const CreateListing = ({ setView, user }) => {
     availability: '',
     category: 'Misc'
   });
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setImageFile(file);
+      // Create preview URL
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -198,15 +227,27 @@ const CreateListing = ({ setView, user }) => {
     setIsSubmitting(true);
     
     try {
-        const colors = ['bg-teal-600', 'bg-indigo-600', 'bg-rose-600', 'bg-amber-600', 'bg-emerald-600', 'bg-blue-600', 'bg-purple-600'];
-        const randomColor = colors[Math.floor(Math.random() * colors.length)];
-        
         const ref = getListingsRef(db);
         if (!ref) throw new Error("Database not initialized");
 
+        let imageUrl = null;
+        let randomColor = null;
+
+        // Upload Image if selected
+        if (imageFile && storage) {
+            const storageRef = ref(storage, `images/${user.uid}/${Date.now()}-${imageFile.name}`);
+            const snapshot = await uploadBytes(storageRef, imageFile);
+            imageUrl = await getDownloadURL(snapshot.ref);
+        } else {
+            // Fallback to random color if no image or storage failed
+            const colors = ['bg-teal-600', 'bg-indigo-600', 'bg-rose-600', 'bg-amber-600', 'bg-emerald-600', 'bg-blue-600', 'bg-purple-600'];
+            randomColor = colors[Math.floor(Math.random() * colors.length)];
+        }
+
         await addDoc(ref, {
             ...formData,
-            imageColor: randomColor,
+            imageUrl: imageUrl, // Save URL
+            imageColor: randomColor, // Save fallback color
             ownerId: user.uid,
             createdAt: serverTimestamp()
         });
@@ -214,7 +255,7 @@ const CreateListing = ({ setView, user }) => {
         setView('browse');
     } catch (error) {
         console.error("Error adding document: ", error);
-        alert("Failed to create listing. Check console for details.");
+        alert("Failed to listing. If image upload failed, check if Storage is enabled in Firebase Console.");
     } finally {
         setIsSubmitting(false);
     }
@@ -232,6 +273,34 @@ const CreateListing = ({ setView, user }) => {
         </h2>
         
         <form onSubmit={handleSubmit} className="space-y-6">
+          
+          {/* Image Upload Section */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Item Photo</label>
+            <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:bg-gray-50 transition-colors cursor-pointer relative group">
+                <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                />
+                {imagePreview ? (
+                    <div className="relative h-48">
+                        <img src={imagePreview} alt="Preview" className="h-full w-full object-contain mx-auto rounded-lg" />
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
+                            <p className="text-white font-bold">Click to change</p>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="text-gray-500 py-4">
+                        <Upload className="mx-auto h-12 w-12 text-gray-400 mb-2 group-hover:text-emerald-500 transition-colors" />
+                        <p className="font-medium">Click to upload a photo</p>
+                        <p className="text-xs text-gray-400 mt-1">JPG, PNG up to 5MB</p>
+                    </div>
+                )}
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Item Title</label>
             <input 
@@ -457,8 +526,12 @@ const ItemDetail = ({ item, onBack }) => {
           <ArrowLeft size={18} /> Back to List
         </button>
         
-        <div className={`w-full h-64 ${item.imageColor || 'bg-gray-400'} rounded-xl mb-6 flex items-center justify-center shadow-inner`}>
-          <Package size={64} className="text-white opacity-50" />
+        <div className={`w-full h-64 ${item.imageColor || 'bg-gray-100'} rounded-xl mb-6 flex items-center justify-center shadow-inner overflow-hidden`}>
+          {item.imageUrl ? (
+            <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
+          ) : (
+            <Package size={64} className="text-gray-400 opacity-50" />
+          )}
         </div>
 
         <h1 className="text-3xl font-bold text-gray-900 mb-2">{item.title}</h1>
@@ -565,8 +638,12 @@ const BrowseListings = ({ listings, onSelect, setView, seedData, isLoading }) =>
             onClick={() => onSelect(item)}
             className="group bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-all duration-300"
             >
-            <div className={`h-48 ${item.imageColor} flex items-center justify-center relative`}>
-                <Package size={48} className="text-white opacity-40 group-hover:scale-110 transition-transform duration-500" />
+            <div className={`h-48 ${item.imageColor || 'bg-gray-200'} flex items-center justify-center relative overflow-hidden`}>
+                {item.imageUrl ? (
+                    <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                ) : (
+                    <Package size={48} className="text-white opacity-40 group-hover:scale-110 transition-transform duration-500" />
+                )}
                 <span className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg text-xs font-bold text-gray-700 shadow-sm">
                     {item.category}
                 </span>
